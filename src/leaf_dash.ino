@@ -25,8 +25,9 @@ bool lightsOn;
 int ledPin = D6;
 
 // 18/6 lighting cycle
-int startHour = 5; // 6am
-int endHour = 23; // 12pm
+// 12/12 flowering on 7/31/20, on at night to keep temps down
+int startHour = 22; // 10pm
+int endHour = 10; // 10am
 
 // temp moving average
 std::deque<double> tempsHistory;
@@ -62,27 +63,51 @@ void setup() {
 void loop() {
   // LIGHTS
   int hour = Time.hour();
-  bool isPastStart = hour >= startHour;
-  bool isBeforeEnd = hour < endHour;
+  bool isPastEnd = hour >= endHour;//10
+  bool isBeforeStart = hour < startHour;//22
+  bool shouldBeOn = !(isPastEnd && isBeforeStart);
+
   // if it has been too long, turn off lights
   unsigned long nowMillis = millis();
   bool hasRecentTempReadings = ((lastValidTempTime + lastValidTempTimeBuffer) >= nowMillis);
   bool tempAverageBelowMax = tempsHistoryAverage < tempTooHotThreshold;
 
-  if (isPastStart && isBeforeEnd && hasRecentTempReadings && tempAverageBelowMax) {
-    if (digitalRead(ledPin) == LOW) {
-      digitalWrite(ledPin, HIGH); // turn on
-      lightsOn = true;
-      Particle.publish("lights", "On");
+  if (true) {
+    // germination cycle - use light as heater
+    double germinationTempMin = 75; // F
+    bool tempAverageBelowMin = tempsHistoryAverage < germinationTempMin;
+    if (hasRecentTempReadings && tempAverageBelowMax && tempAverageBelowMin) {
+      if (digitalRead(ledPin) == LOW) {
+        digitalWrite(ledPin, HIGH); // turn on
+        lightsOn = true;
+        Particle.publish("lights", "On");
+      };
+    } else {
+      if (digitalRead(ledPin) == HIGH) {
+        digitalWrite(ledPin, LOW); // turn off
+        lightsOn = false;
+        Particle.publish("lights", "Off");
+        String boolString = String(String::format("hasRecentTempReadings: %d, tempAverageBelowMax: %d", hasRecentTempReadings, tempAverageBelowMax));
+        Particle.publish("light bools", boolString);
+      };
     };
   } else {
-    if (digitalRead(ledPin) == HIGH) {
-      digitalWrite(ledPin, LOW); // turn off
-      lightsOn = false;
-      Particle.publish("lights", "Off");
-      String boolString = String(String::format("isPastStart: %d, isBeforeEnd: %d, hasRecentTempReadings: %d, tempAverageBelowMax: %d", isPastStart, isBeforeEnd, hasRecentTempReadings, tempAverageBelowMax));
-      Particle.publish("light bools", boolString);
-    }
+    // light cycle
+    if (shouldBeOn && hasRecentTempReadings && tempAverageBelowMax) {
+      if (digitalRead(ledPin) == LOW) {
+        digitalWrite(ledPin, HIGH); // turn on
+        lightsOn = true;
+        Particle.publish("lights", "On");
+      };
+    } else {
+      if (digitalRead(ledPin) == HIGH) {
+        digitalWrite(ledPin, LOW); // turn off
+        lightsOn = false;
+        Particle.publish("lights", "Off");
+        String boolString = String(String::format("shouldBeOn: %d, hasRecentTempReadings: %d, tempAverageBelowMax: %d", shouldBeOn, hasRecentTempReadings, tempAverageBelowMax));
+        Particle.publish("light bools", boolString);
+      };
+    };
   };
 
   // LOGGING
