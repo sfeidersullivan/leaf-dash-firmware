@@ -7,22 +7,27 @@
 
 // #include "Grove_Temperature_And_Humidity_Sensor.h"
 // #include "Adafruit_DHT.h"
-#include "Adafruit_DHT_Particle.h"
+// #include "Adafruit_DHT_Particle.h"
 // #include "DHT.h"
+#include "PietteTech_DHT.h"
+
 #include <deque>
 
 #define DHTPIN D2
 #define DHTTYPE DHT11 // DHT 11, DHT 22 (AM2302), DHT 21 (AM2301)
 
-DHT dht(DHTPIN, DHTTYPE); // instantiate temp/humidity over dht
+// DHT dht(DHTPIN, DHTTYPE); // instantiate temp/humidity over dht
+PietteTech_DHT DHT(DHTPIN, DHTTYPE);
+
 STARTUP(WiFi.selectAntenna(ANT_AUTO)); // continually switches at high speed between antennas
 
 // Particle variables
 double tempF, humidity, dewPoint, heatIndex;
-bool lightsOn;
+bool lightsOn, heaterOn;
 
 // Particle pins
 int ledPin = D6;
+int heaterPin = D4;
 
 // 18/6 lighting cycle
 // 12/12 flowering on 7/31/20, on at night to keep temps down
@@ -33,16 +38,66 @@ int endHour = 10; // 10am
 std::deque<double> tempsHistory;
 double tempsHistorySum = 0;
 double tempsHistoryAverage = 0; // average of last 10 readings
-int tempsHistoryLength = 20; // monitor the last 10 readings
+int tempsHistoryLength = 10; // monitor the last 10 readings
 double tempTooHotThreshold = 105; // F
 unsigned long lastValidTempTime;
 unsigned long lastValidTempTimeBuffer = 300000; // 5 min
+
+class HeaterTimer {
+private:
+  Timer t = Timer(240000, &HeaterTimer::callback, *this);
+public:
+  void start() { t.reset(); };
+  bool active() { return t.isActive(); };
+  void callback() {
+    t.stop();
+    digitalWrite(heaterPin, LOW); // turn off
+    heaterOn = false;
+    Particle.publish("heater", "Off");
+  };
+};
+HeaterTimer heaterTimer = HeaterTimer();
+
+void checkDhtStatus() {
+  int result = DHT.acquireAndWait(1000); // wait up to 1 sec (default indefinitely)
+
+  switch (result) {
+  case DHTLIB_OK:
+    // Particle.publish("state","OK");
+    break;
+  case DHTLIB_ERROR_CHECKSUM:
+    Particle.publish("DHT Error","Checksum error");
+    break;
+  case DHTLIB_ERROR_ISR_TIMEOUT:
+    Particle.publish("DHT Error","ISR time out error");
+    break;
+  case DHTLIB_ERROR_RESPONSE_TIMEOUT:
+    Particle.publish("DHT Error","Response time out error");
+    break;
+  case DHTLIB_ERROR_DATA_TIMEOUT:
+    Particle.publish("DHT Error","Data time out error");
+    break;
+  case DHTLIB_ERROR_ACQUIRING:
+    Particle.publish("DHT Error","Acquiring");
+    break;
+  case DHTLIB_ERROR_DELTA:
+    Particle.publish("DHT Error","Delta time to small");
+    break;
+  case DHTLIB_ERROR_NOTSTARTED:
+    Particle.publish("DHT Error","Not started");
+    break;
+  default:
+    Particle.publish("DHT Error","Unknown error");
+    break;
+  };
+};
 
 void setup() {
   Time.zone(-7); // UTC --> PST
 
   // define pins
   pinMode(ledPin, OUTPUT);
+  pinMode(heaterPin, OUTPUT);
 
   // init serial logging
   Serial.begin(9600);
@@ -55,9 +110,10 @@ void setup() {
   Particle.variable("dewPoint", dewPoint);
   Particle.variable("heatIndex", heatIndex);
   Particle.variable("lights_On", lightsOn);
+  Particle.variable("heater_On", heaterOn);
 
   // Wire.begin();
-  dht.begin(); // begin reading temp/humidity via dht
+  DHT.begin(); // begin reading temp/humidity via dht
 }
 
 void loop() {
@@ -72,25 +128,18 @@ void loop() {
   bool hasRecentTempReadings = ((lastValidTempTime + lastValidTempTimeBuffer) >= nowMillis);
   bool tempAverageBelowMax = tempsHistoryAverage < tempTooHotThreshold;
 
+  checkDhtStatus();
   if (true) {
-    // germination cycle - use light as heater
-    double germinationTempMin = 75; // F
+    // germination cycle - use heater
+    double germinationTempMin = 80; // F
     bool tempAverageBelowMin = tempsHistoryAverage < germinationTempMin;
-    if (hasRecentTempReadings && tempAverageBelowMax && tempAverageBelowMin) {
-      if (digitalRead(ledPin) == LOW) {
-        digitalWrite(ledPin, HIGH); // turn on
-        lightsOn = true;
-        Particle.publish("lights", "On");
-      };
-    } else {
-      if (digitalRead(ledPin) == HIGH) {
-        digitalWrite(ledPin, LOW); // turn off
-        lightsOn = false;
-        Particle.publish("lights", "Off");
-        String boolString = String(String::format("hasRecentTempReadings: %d, tempAverageBelowMax: %d", hasRecentTempReadings, tempAverageBelowMax));
-        Particle.publish("light bools", boolString);
-      };
-    };
+    if (hasRecentTempReadings && tempAverageBelowMax && tempAverageBelowMin && !heaterTimer.active()) {
+      digitalWrite(heaterPin, HIGH); // turn on
+      heaterOn = true;
+      Particle.publish("heater", "On");
+
+      heaterTimer.start();
+    }
   } else {
     // light cycle
     if (shouldBeOn && hasRecentTempReadings && tempAverageBelowMax) {
@@ -113,9 +162,11 @@ void loop() {
   // LOGGING
   // Reading temperature or humidity takes about 250 milliseconds!
   // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
-  humidity = dht.getHumidity();
+  humidity = DHT.getHumidity();
   // float tempC = dht.getTempCelcius(); // read temp (C)
-  tempF = dht.getTempFarenheit(); // read temp (F)
+  // tempF = dht.getTempFarenheit(); // read temp (F)
+  tempF = DHT.getFahrenheit();
+  dewPoint = DHT.getDewPoint(); // (C)
 
   if (isnan(tempF)) {
     String tempErrorMessage = "Failed to read from DHT Temperature sensor!";
@@ -142,15 +193,10 @@ void loop() {
     Particle.publish("Sensor Error", humErrorMessage);
 	};
 
-  // Must send in temp in Fahrenheit
-  heatIndex = dht.getHeatIndex(); // (C)
-  dewPoint = dht.getDewPoint(); // (C)
-  float k = dht.getTempKelvin(); // (K)
-
-  String readings = String(String::format("{\"Hum(\%)\": %4.2f, \"Temp(°F)\": %4.2f, \"DP(°C)\": %4.2f, \"HI(°C)\": %4.2f, \"TempAvg(°F)\": %4.2f}", humidity, tempF, dewPoint, heatIndex, tempsHistoryAverage));
+  String readings = String(String::format("{\"Hum(\%)\": %4.2f, \"Temp(°F)\": %4.2f, \"DP(°C)\": %4.2f, \"TempAvg(°F)\": %4.2f}", humidity, tempF, dewPoint, tempsHistoryAverage));
   Serial.println(readings);
   Serial.println(Time.timeStr());
   Particle.publish("readings", readings);
 
-  delay(5000);
+  delay(10000);
 };
