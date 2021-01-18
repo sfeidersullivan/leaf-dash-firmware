@@ -9,7 +9,9 @@
 // #include "Adafruit_DHT.h"
 // #include "Adafruit_DHT_Particle.h"
 // #include "DHT.h"
+#include "Wire.h"
 #include "PietteTech_DHT.h"
+#include "SparkFun_Qwiic_Humidity_AHT20.h"
 
 #include <deque>
 
@@ -18,11 +20,12 @@
 
 // DHT dht(DHTPIN, DHTTYPE); // instantiate temp/humidity over dht
 PietteTech_DHT DHT(DHTPIN, DHTTYPE);
+AHT20 ahtSensor;
 
 STARTUP(WiFi.selectAntenna(ANT_AUTO)); // continually switches at high speed between antennas
 
 // Particle variables
-double tempF, humidity, dewPoint, heatIndex;
+double tempF, ahtTempF, ahtHumidity, humidity, dewPoint, heatIndex;
 bool lightsOn, heaterOn;
 
 // Particle pins
@@ -102,9 +105,10 @@ void setup() {
   // init serial logging
   Serial.begin(9600);
   Serial.printlnf("setup...");
-  Particle.publish("state", "setup...");
+  Particle.publish("board state", "setup...");
 
   // track variables
+  Particle.publish("setup:", "Particle variables");
   Particle.variable("temp_F", tempF);
   Particle.variable("humidity", humidity);
   Particle.variable("dewPoint", dewPoint);
@@ -112,8 +116,16 @@ void setup() {
   Particle.variable("lights_On", lightsOn);
   Particle.variable("heater_On", heaterOn);
 
-  // Wire.begin();
+  Particle.publish("setup:", "I2C protocol");
+  Wire.begin(); //Join I2C bus
+
+  Particle.publish("setup:", "DHT communication");
   DHT.begin(); // begin reading temp/humidity via dht
+
+  // begin temp/humidity via AHT20
+  Particle.publish("setup:", "AHT20 communication");
+  if (ahtSensor.begin() == false) Particle.publish("AHT20 setup", "failed");
+  else Particle.publish("AHT20 setup", "success");
 }
 
 void loop() {
@@ -191,9 +203,17 @@ void loop() {
     Particle.publish("Sensor Error", humErrorMessage);
 	};
 
-  String readings = String(String::format("{\"Hum(\%)\": %4.2f, \"Temp(°F)\": %4.2f, \"DP(°C)\": %4.2f, \"TempAvg(°F)\": %4.2f}", humidity, tempF, dewPoint, tempsHistoryAverage));
-  Serial.println(readings);
-  Serial.println(Time.timeStr());
+  // read AHT20 sensor
+  if (ahtSensor.available() == true)
+  {
+    double ahtTempC = ahtSensor.getTemperature();
+    ahtHumidity = ahtSensor.getHumidity();
+    ahtTempF = (ahtTempC * 9/5) + 32;
+  } else {
+    Particle.publish("AHT readings", "not available");
+  }
+
+  String readings = String(String::format("{\"Temp(°F)\": %4.2f, \"ahtTemp(°F)\": %4.2f, \"Hum(\%)\": %4.2f, \"ahtHum(\%)\": %4.2f, \"TempAvg(°F)\": %4.2f}", tempF, ahtTempF, humidity, ahtHumidity, tempsHistoryAverage));
   Particle.publish("readings", readings);
 
   delay(10000);
