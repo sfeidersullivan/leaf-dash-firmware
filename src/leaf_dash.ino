@@ -5,10 +5,6 @@
  * Date: 7/21/2020
  */
 
-// #include "Grove_Temperature_And_Humidity_Sensor.h"
-// #include "Adafruit_DHT.h"
-// #include "Adafruit_DHT_Particle.h"
-// #include "DHT.h"
 #include "Wire.h"
 #include "PietteTech_DHT.h"
 #include "SparkFun_Qwiic_Humidity_AHT20.h"
@@ -16,10 +12,9 @@
 #include <deque>
 
 #define DHTPIN D2
-#define DHTTYPE DHT11 // DHT 11, DHT 22 (AM2302), DHT 21 (AM2301)
+#define DHTTYPE DHT11
 
-// DHT dht(DHTPIN, DHTTYPE); // instantiate temp/humidity over dht
-PietteTech_DHT DHT(DHTPIN, DHTTYPE);
+PietteTech_DHT DHT(DHTPIN, DHTTYPE); // instantiate temp/humidity over dht
 AHT20 ahtSensor;
 
 STARTUP(WiFi.selectAntenna(ANT_AUTO)); // continually switches at high speed between antennas
@@ -34,7 +29,8 @@ int heaterPin = D4;
 
 // 12/12 flowering on 7/31/20, on at night to keep temps down (10pm-10am)
 // 18/6 veg on 12/9/20 (6pm-10am)
-int startHour = 18; // 6pm
+// 10/10 flower on 4/10/21 (10pm-10am)
+int startHour = 20; // 10pm
 int endHour = 10; // 10am
 
 // temp moving average
